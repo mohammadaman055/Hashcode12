@@ -5,6 +5,7 @@ import os
 from pymongo import MongoClient
 import threading
 import time
+from PyPDF2 import PdfReader
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret_key' 
@@ -87,9 +88,18 @@ def delete_file_after_delay(filename, delay):
     except FileNotFoundError:
         pass
 
+num_pages=0
+
 @app.route('/upload', methods=['POST'])
 def upload_and_store_file():
     if 'username' in session:
+        def analyze_file(file):
+            if file and file.filename.endswith('.pdf'):
+                pdf_reader = PdfReader(file)
+                return len(pdf_reader.pages)
+            else:
+                return 0
+        
         create_upload_folder()
         if request.method == 'POST':
             file = request.files['file']
@@ -98,6 +108,9 @@ def upload_and_store_file():
                 file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(file_path)
                 threading.Thread(target=delete_file_after_delay, args=(file_path, 30)).start()
+                
+                global num_pages
+                num_pages = analyze_file(file)
 
         if request.method == 'POST':
             name = request.form['name']
@@ -117,15 +130,40 @@ def upload_and_store_file():
                 'filepath': file_path
             }
             collection.insert_one(data)
-            return redirect(url_for('success'))
+            return redirect(url_for('payment'))
 
         return render_template('userpg.html', username=session['username'])
     else:
         return redirect(url_for('login'))
+    
+@app.route('/payment')
+def payment():
+    if 'username' in session:
+        latest_data = collection.find_one(sort=[('_id', -1)])
+        if latest_data is None:
+            return "Error: No data found in the database."
 
-@app.route('/success')
-def success():
-    return 'Data successfully stored in MongoDB!'
+        cost = 0
+        black_white_price_per_page = 2
+        color_price_per_page = 10
+
+        if latest_data.get('blackWhitePrint', False):
+            cost = black_white_price_per_page * num_pages * int(latest_data['quantity'])
+        if latest_data.get('colorPrint', False):
+            cost = color_price_per_page * num_pages* int(latest_data['quantity'])
+
+        if latest_data.get('twoside', False):
+            black_white_price_per_page = 4
+            color_price_per_page = 14
+            if latest_data.get('blackWhitePrint', False):
+                cost = black_white_price_per_page * int(num_pages/2)* int(latest_data['quantity'])
+            if latest_data.get('colorPrint', False):
+                cost = color_price_per_page * int(num_pages/2)* int(latest_data['quantity'])
+
+        return render_template('payment.html', data=latest_data, cost=cost)
+    else:
+        return redirect(url_for('upload'))
+
 
 if __name__ == "__main__":
     app.run(debug=True)
