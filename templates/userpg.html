@@ -49,13 +49,11 @@
             <div class="col-md-8 offset-md-2">
                 <div class="form-container">
                     <h3>User Portal</h3>
-                    <form action="" method="POST">
+                    <form action="/upload" method="POST" enctype="multipart/form-data">
                         <div class="form-group">
-                            <label for="name"></label>
                             <input type="text" class="form-control" id="name" name="name" placeholder="Enter your name">
                         </div>
                         <div class="form-group">
-                            <label for="fileType"></label>
                             <select class="form-control" id="fileType" name="fileType">
                                 <option value="pdf">PDF</option>
                                 <option value="word">Word</option>
@@ -63,10 +61,8 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <input type="file" id="uploadFile" style="display:none">
+                            <input type="file" id="uploadFile" name="file" style="display:none">
                             <label for="uploadFile" class="btn btn-primary btn-block">Upload</label>
-                            <?php endif; ?>
-                            <span id="selectedFileName"></span> 
                         </div>
                         <div class="form-group">
                             <label for="printOptions"></label><br>
@@ -80,7 +76,7 @@
                                 <label class="form-check-label" for="colorPrint">Color</label>
                             </div>
                             <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox" id="twoside" name="colorPrint">
+                                <input class="form-check-input" type="checkbox" id="twoside" name="twoside">
                                 <label class="form-check-label" for="twoside">Twosided</label>
                             </div>
                         </div>
@@ -92,6 +88,7 @@
                         </div>
                         <button type="submit" class="btn btn-primary btn-block">Submit</button>
                     </form>
+
                 </div>
             </div>
         </div>

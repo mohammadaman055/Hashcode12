@@ -1,12 +1,15 @@
+import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, session
 from werkzeug.security import check_password_hash, generate_password_hash
-import sqlite3
+import os
 from pymongo import MongoClient
-app = Flask(__name__)
+import threading
+import time
 
-# ----------------------------------------------------------Authentication--------------------------------------------------------
-app.config['SECRET_KEY'] = 'your_secret_key' 
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret_key' 
 app.config['DATABASE'] = 'database.db'
+
 def connect_db():
     return sqlite3.connect(app.config['DATABASE'], detect_types=sqlite3.PARSE_DECLTYPES)
 
@@ -55,13 +58,74 @@ def login():
     return render_template('login.html', message='')
 
 # ----------------------------------------------------------Authentication--------------------------------------------------------
-# Home route (after successful login)
 @app.route('/home')
 def home():
     if 'user_id' in session:
         return render_template('userpg.html', username=session['username'])
     else:
         return redirect(url_for('login'))
+
+
+UPLOAD_FOLDER = 'uploads'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+client = MongoClient('mongodb://localhost:27017/')
+db = client['HashCode12']
+collection = db['PrintJobs']
+
+UPLOAD_FOLDER = 'uploads'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+def create_upload_folder():
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER)
+
+def delete_file_after_delay(filename, delay):
+    time.sleep(delay)
+    try:
+        os.remove(filename)
+    except FileNotFoundError:
+        pass
+
+@app.route('/upload', methods=['POST'])
+def upload_and_store_file():
+    if 'username' in session:
+        create_upload_folder()
+        if request.method == 'POST':
+            file = request.files['file']
+            if file:
+                filename = file.filename
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                threading.Thread(target=delete_file_after_delay, args=(file_path, 30)).start()
+
+        if request.method == 'POST':
+            name = request.form['name']
+            fileType = request.form['fileType']
+            blackWhitePrint = request.form.get('blackWhitePrint', False) == 'on'
+            colorPrint = request.form.get('colorPrint', False) == 'on'
+            twoside = request.form.get('twoside', False) == 'on'
+            quantity = request.form['quantity']
+
+            data = {
+                'name': name,
+                'fileType': fileType,
+                'blackWhitePrint': blackWhitePrint,
+                'colorPrint': colorPrint,
+                'twoside': twoside,
+                'quantity': quantity,
+                'filepath': file_path
+            }
+            collection.insert_one(data)
+            return redirect(url_for('success'))
+
+        return render_template('userpg.html', username=session['username'])
+    else:
+        return redirect(url_for('login'))
+
+@app.route('/success')
+def success():
+    return 'Data successfully stored in MongoDB!'
 
 if __name__ == "__main__":
     app.run(debug=True)
