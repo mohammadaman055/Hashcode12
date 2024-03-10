@@ -1,4 +1,5 @@
 import sqlite3
+import win32api
 from flask import Flask, render_template, request, redirect, url_for, session
 from werkzeug.security import check_password_hash, generate_password_hash
 import os
@@ -6,6 +7,7 @@ from pymongo import MongoClient
 import threading
 import time
 from PyPDF2 import PdfReader
+from flask import jsonify
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret_key' 
@@ -91,34 +93,20 @@ def delete_file_after_delay(filename, delay):
 num_pages=0
 
 @app.route('/upload', methods=['POST'])
-def upload_and_store_file():
+def upload():
     if 'username' in session:
-        def analyze_file(file):
-            if file and file.filename.endswith('.pdf'):
-                pdf_reader = PdfReader(file)
-                return len(pdf_reader.pages)
-            else:
-                return 0
         
         create_upload_folder()
-        if request.method == 'POST':
-            file = request.files['file']
-            if file:
-                filename = file.filename
-                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(file_path)
-                threading.Thread(target=delete_file_after_delay, args=(file_path, 30)).start()
-                
-                global num_pages
-                num_pages = analyze_file(file)
 
         if request.method == 'POST':
-            name = request.form['name']
-            fileType = request.form['fileType']
-            blackWhitePrint = request.form.get('blackWhitePrint', False) == 'on'
-            colorPrint = request.form.get('colorPrint', False) == 'on'
-            twoside = request.form.get('twoside', False) == 'on'
-            quantity = request.form['quantity']
+            name = session['name']
+            fileType = session['fileType']
+            blackWhitePrint = session['blackWhitePrint']
+            colorPrint = session['colorPrint']
+            twoside = session['twoside']
+            quantity = session['quantity']
+            file_path = session['filepath']
+            cost = session['cost']
 
             data = {
                 'name': name,
@@ -127,42 +115,130 @@ def upload_and_store_file():
                 'colorPrint': colorPrint,
                 'twoside': twoside,
                 'quantity': quantity,
-                'filepath': file_path
+                'filepath': file_path,
+                'cost': cost,
             }
             collection.insert_one(data)
-            return redirect(url_for('payment'))
+            
+            return redirect(url_for('printjob'))
 
         return render_template('userpg.html', username=session['username'])
     else:
         return redirect(url_for('login'))
-    
-@app.route('/payment')
+
+@app.route('/payment',methods=['GET', 'POST'])
 def payment():
     if 'username' in session:
-        latest_data = collection.find_one(sort=[('_id', -1)])
-        if latest_data is None:
-            return "Error: No data found in the database."
+        def analyze_file(file):
+            if file and file.filename.endswith('.pdf'):
+                pdf_reader = PdfReader(file)
+                return len(pdf_reader.pages)
+            else:
+                return 0
+            
+        if request.method == 'POST':
+            file = request.files['file']
+            if file:
+                filename = file.filename
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                threading.Thread(target=delete_file_after_delay, args=(file_path, 20)).start()
+                
+                global num_pages
+                num_pages = analyze_file(file)
+    
+        if request.method == 'POST':
+            name = request.form['name']
+            fileType = request.form['fileType']
+            blackWhitePrint = request.form.get('blackWhitePrint', False) == 'on'
+            colorPrint = request.form.get('colorPrint', False) == 'on'
+            twoside = request.form.get('twoside', False) == 'on'
+            quantity = request.form['quantity']
+            file = request.files['file']   
 
-        cost = 0
-        black_white_price_per_page = 2
-        color_price_per_page = 10
+            session['name'] = name
+            session['fileType'] = fileType
+            session['blackWhitePrint'] = blackWhitePrint
+            session['colorPrint'] = colorPrint
+            session['twoside'] = twoside
+            session['quantity'] = quantity
+            session['filepath']=file_path
 
-        if latest_data.get('blackWhitePrint', False):
-            cost = black_white_price_per_page * num_pages * int(latest_data['quantity'])
-        if latest_data.get('colorPrint', False):
-            cost = color_price_per_page * num_pages* int(latest_data['quantity'])
+            data = {
+                    'name': name,
+                    'fileType': fileType,
+                    'blackWhitePrint': blackWhitePrint,
+                    'colorPrint': colorPrint,
+                    'twoside': twoside,
+                    'quantity': quantity,
+                }
 
-        if latest_data.get('twoside', False):
-            black_white_price_per_page = 4
-            color_price_per_page = 14
-            if latest_data.get('blackWhitePrint', False):
-                cost = black_white_price_per_page * int(num_pages/2)* int(latest_data['quantity'])
-            if latest_data.get('colorPrint', False):
-                cost = color_price_per_page * int(num_pages/2)* int(latest_data['quantity'])
+            cost = 0
+            black_white_price_per_page = 2
+            color_price_per_page = 10
 
-        return render_template('payment.html', data=latest_data, cost=cost)
+            if data.get('blackWhitePrint', False):
+                    cost = black_white_price_per_page * num_pages * int(data['quantity'])
+            if data.get('colorPrint', False):
+                    cost = color_price_per_page * num_pages* int(data['quantity'])
+
+            if data.get('twoside', False):
+                    black_white_price_per_page = 4
+                    color_price_per_page = 14
+                    if data.get('blackWhitePrint', False):
+                        cost = black_white_price_per_page * int(num_pages/2)* int(data['quantity'])
+                    if data.get('colorPrint', False):
+                        cost = color_price_per_page * int(num_pages/2)* int(data['quantity'])
+            
+            session['cost']=cost
+        return render_template('payment.html', data=data, cost=cost)
     else:
-        return redirect(url_for('upload'))
+            return redirect(url_for('upload'))
+
+def print_file(file_path, printer_name=None):
+    try:
+        # Check if the file exists
+        if not os.path.exists(file_path):
+            print("File not found.")
+            return
+
+        # Print the file using ShellExecute
+        if printer_name is not None:
+            win32api.ShellExecute(0, "printto", file_path, f'"{printer_name}"', ".", 0)
+        else:
+            win32api.ShellExecute(0, "print", file_path, None, ".", 0)
+        
+        print("Printing job started successfully.")
+    except Exception as e:
+        print("An error occurred:", e)
+
+
+@app.route('/printjob')
+def printjob():
+    latest_print_job = get_latest_print_job()
+    if latest_print_job:
+        file_path = latest_print_job.get('filepath')
+        if file_path:
+            print_file(file_path)
+    
+    return redirect(url_for('success')) 
+
+# Define get_latest_print_job function outside of the route definitions
+def get_latest_print_job():
+    try:
+        latest_print_job = collection.find_one(sort=[('_id', -1)])
+        if latest_print_job:
+            return latest_print_job
+        else:
+            print("No print job found.")
+            return None
+    except Exception as e:
+        print("An error occurred while retrieving the latest print job:", e)
+        return None
+
+@app.route('/success')
+def success():
+    return render_template('success.html')
 
 
 if __name__ == "__main__":
