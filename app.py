@@ -7,7 +7,6 @@ from pymongo import MongoClient
 import threading
 import time
 from PyPDF2 import PdfReader
-from flask import jsonify
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret_key' 
@@ -53,12 +52,15 @@ def login():
         if user and check_password_hash(user[2], password):
             session['user_id'] = user[0]
             session['username'] = user[1]
-
-            return redirect(url_for('home'))
+            if user[1] == 'admin':
+                return redirect(url_for('admin'))  
+            else:
+                return redirect(url_for('home'))  
         else:
             return render_template('login.html', message='Invalid username or password')
 
     return render_template('login.html', message='')
+
 
 # ----------------------------------------------------------Authentication--------------------------------------------------------
 @app.route('/home')
@@ -142,7 +144,7 @@ def payment():
                 filename = file.filename
                 file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(file_path)
-                threading.Thread(target=delete_file_after_delay, args=(file_path, 20)).start()
+                threading.Thread(target=delete_file_after_delay, args=(file_path, 30)).start()
                 
                 global num_pages
                 num_pages = analyze_file(file)
@@ -197,12 +199,10 @@ def payment():
 
 def print_file(file_path, printer_name=None):
     try:
-        # Check if the file exists
         if not os.path.exists(file_path):
             print("File not found.")
             return
-
-        # Print the file using ShellExecute
+        
         if printer_name is not None:
             win32api.ShellExecute(0, "printto", file_path, f'"{printer_name}"', ".", 0)
         else:
@@ -223,7 +223,6 @@ def printjob():
     
     return redirect(url_for('success')) 
 
-# Define get_latest_print_job function outside of the route definitions
 def get_latest_print_job():
     try:
         latest_print_job = collection.find_one(sort=[('_id', -1)])
@@ -239,6 +238,29 @@ def get_latest_print_job():
 @app.route('/success')
 def success():
     return render_template('success.html')
+
+
+from flask import render_template
+
+@app.route('/admin', methods=['GET', 'POST'])
+def admin():
+    if request.method == 'GET':
+        client = MongoClient('mongodb://localhost:27017/')
+        db = client['HashCode12']
+        collection = db['PrintJobs']
+        print_jobs = collection.find({}, {"_id": 0})  
+        
+        total_jobs = 0
+        total_earning = 0
+        
+        print_jobs = list(print_jobs)
+        for job in print_jobs:
+            total_jobs += 1
+            total_earning += job['cost']
+        
+        return render_template('admin.html', print_jobs=print_jobs, total_jobs=total_jobs, total_earning=total_earning)
+    elif request.method == 'POST':
+        pass
 
 
 if __name__ == "__main__":
